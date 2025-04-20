@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{5548d8d5-518b-4b89-ac9a-180ee99dc3a6}</ProjectGuid>
-    <RootNamespace>AtaxxJsonVer</RootNamespace>
+    <ProjectGuid>{28268e7f-033a-4705-8e19-dfa9b4cb66c1}</ProjectGuid>
+    <RootNamespace>TestMCTS</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

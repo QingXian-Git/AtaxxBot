@@ -1,194 +1,212 @@
-// 同化棋（Ataxx）简易交互样例程序
-// 随机策略
-// 作者：zhouhy zys
-// 游戏信息：http://www.botzone.org/games#Ataxx
-
-
 #include <iostream>
 #include <string>
 #include <cstdlib>
 #include <ctime>
-
 using namespace std;
 
-int currBotColor; // 我所执子颜色（1为黑，-1为白，棋盘状态亦同）
-int gridInfo[7][7] = { 0 }; // 先x后y，记录棋盘状态
+int gridInfo[7][7] = { 0 };
 int blackPieceCount = 2, whitePieceCount = 2;
-int startX, startY, resultX, resultY;
-static int delta[24][2] = { { 1,1 },{ 0,1 },{ -1,1 },{ -1,0 },
-{ -1,-1 },{ 0,-1 },{ 1,-1 },{ 1,0 },
-{ 2,0 },{ 2,1 },{ 2,2 },{ 1,2 },
-{ 0,2 },{ -1,2 },{ -2,2 },{ -2,1 },
-{ -2,0 },{ -2,-1 },{ -2,-2 },{ -1,-2 },
-{ 0,-2 },{ 1,-2 },{ 2,-2 },{ 2,-1 } };
+int currBotColor = 1;
+bool isBlackBot = false;
+bool isWhiteBot = false;
 
-// 判断是否在地图内
-inline bool inMap(int x, int y)
-{
-	if (x < 0 || x > 6 || y < 0 || y > 6)
-		return false;
-	return true;
+static int delta[24][2] = {
+    { 1,1 },{ 0,1 },{ -1,1 },{ -1,0 },{ -1,-1 },{ 0,-1 },{ 1,-1 },{ 1,0 },
+    { 2,0 },{ 2,1 },{ 2,2 },{ 1,2 },{ 0,2 },{ -1,2 },{ -2,2 },{ -2,1 },
+    { -2,0 },{ -2,-1 },{ -2,-2 },{ -1,-2 },{ 0,-2 },{ 1,-2 },{ 2,-2 },{ 2,-1 }
+};
+
+inline bool inMap(int x, int y) {
+    return x >= 0 && x < 7 && y >= 0 && y < 7;
 }
 
-// 向Direction方向改动坐标，并返回是否越界
-inline bool MoveStep(int& x, int& y, int Direction)
-{
-	x = x + delta[Direction][0];
-	y = y + delta[Direction][1];
-	return inMap(x, y);
+bool ProcStep(int x0, int y0, int x1, int y1, int color) {
+    if (color == 0) return false;
+    if (x1 == -1) return true;
+    if (!inMap(x0, y0) || !inMap(x1, y1)) return false;
+    if (gridInfo[x0][y0] != color) return false;
+
+    int dx = abs(x0 - x1), dy = abs(y0 - y1);
+    if ((dx == 0 && dy == 0) || dx > 2 || dy > 2) return false;
+    if (gridInfo[x1][y1] != 0) return false;
+
+    if (dx == 2 || dy == 2)
+        gridInfo[x0][y0] = 0;
+    else {
+        if (color == 1) blackPieceCount++;
+        else whitePieceCount++;
+    }
+
+    gridInfo[x1][y1] = color;
+
+    int currCount = 0;
+    int effectivePoints[8][2];
+    for (int dir = 0; dir < 8; dir++) {
+        int x = x1 + delta[dir][0];
+        int y = y1 + delta[dir][1];
+        if (!inMap(x, y)) continue;
+        if (gridInfo[x][y] == -color) {
+            effectivePoints[currCount][0] = x;
+            effectivePoints[currCount][1] = y;
+            currCount++;
+            gridInfo[x][y] = color;
+        }
+    }
+    if (currCount > 0) {
+        if (color == 1) {
+            blackPieceCount += currCount;
+            whitePieceCount -= currCount;
+        }
+        else {
+            whitePieceCount += currCount;
+            blackPieceCount -= currCount;
+        }
+    }
+    return true;
 }
 
-//(调试用)用来输出当前棋盘状态
-void printBoard() {
-	for (int i = 0; i < 7; i++) {
-		for (int j = 0; j < 7; j++) {
-			cout << gridInfo[i][j] << "\t";
-		}
-		cout << endl;
-		cout << endl;
-	}
+void PrintBoard() {
+    cout << "\n当前棋盘状态：\n";
+    cout << "  0 1 2 3 4 5 6\n";
+    for (int y = 0; y < 7; y++) {
+        cout << y << " ";
+        for (int x = 0; x < 7; x++) {
+            if (gridInfo[x][y] == 1) cout << "○ ";
+            else if (gridInfo[x][y] == -1) cout << "● ";
+            else cout << "· ";
+        }
+        cout << "\n";
+    }
+    cout << "黑子数(○): " << blackPieceCount << "  白子数(●): " << whitePieceCount << "\n\n";
 }
 
-// 在坐标处落子，检查是否合法或模拟落子
-bool ProcStep(int x0, int y0, int x1, int y1, int color)
-{
-	if (color == 0)
-		return false;
-	if (x1 == -1) // 无路可走，跳过此回合
-		return true;
-	if (!inMap(x0, y0) || !inMap(x1, y1)) // 超出边界
-		return false;
-	if (gridInfo[x0][y0] != color)
-		return false;
-	int dx, dy, x, y, currCount = 0, dir;
-	int effectivePoints[8][2];
-	dx = abs((x0 - x1)), dy = abs((y0 - y1));
-	if ((dx == 0 && dy == 0) || dx > 2 || dy > 2) // 保证不会移动到原来位置，而且移动始终在5×5区域内
-		return false;
-	if (gridInfo[x1][y1] != 0) // 保证移动到的位置为空
-		return false;
-	if (dx == 2 || dy == 2) // 如果走的是5×5的外围，则不是复制粘贴
-		gridInfo[x0][y0] = 0;
-	else
-	{
-		if (color == 1)
-			blackPieceCount++;
-		else
-			whitePieceCount++;
-	}
-
-	gridInfo[x1][y1] = color;
-	for (dir = 0; dir < 8; dir++) // 影响邻近8个位置
-	{
-		x = x1 + delta[dir][0];
-		y = y1 + delta[dir][1];
-		if (!inMap(x, y))
-			continue;
-		if (gridInfo[x][y] == -color)
-		{
-			effectivePoints[currCount][0] = x;
-			effectivePoints[currCount][1] = y;
-			currCount++;
-			gridInfo[x][y] = color;
-		}
-	}
-	if (currCount != 0)
-	{
-		if (color == 1)
-		{
-			blackPieceCount += currCount;
-			whitePieceCount -= currCount;
-		}
-		else
-		{
-			whitePieceCount += currCount;
-			blackPieceCount -= currCount;
-		}
-	}
-	return true;
+void GameOver() {
+    cout << "\n===== 对局结束 =====\n";
+    PrintBoard();
+    exit(0);
 }
 
-int main()
-{
-	istream::sync_with_stdio(false);
+bool BotMove(int color, int& x0, int& y0, int& x1, int& y1) {
+    // 简单随机合法落子
+    for (int tx = 0; tx < 7; tx++) {
+        for (int ty = 0; ty < 7; ty++) {
+            if (gridInfo[tx][ty] != color) continue;
+            for (int d = 0; d < 24; d++) {
+                int nx = tx + delta[d][0];
+                int ny = ty + delta[d][1];
+                if (inMap(nx, ny) && gridInfo[nx][ny] == 0) {
+                    x0 = tx; y0 = ty;
+                    x1 = nx; y1 = ny;
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
 
-	int x0, y0, x1, y1;
+bool PlayerMove(int color) {
+    string inputLine;
+    string sideStr = (color == 1 ? "黑方(○)" : "白方(●)");
+    cout << sideStr << " 请输入落子坐标 (x0 y0 x1 y1)，跳过输入 -1 -1 -1 -1，退出输入 q：";
+    getline(cin, inputLine);
 
-	// 初始化棋盘
-	gridInfo[0][0] = gridInfo[6][6] = 1;  //|黑|白|
-	gridInfo[6][0] = gridInfo[0][6] = -1; //|白|黑|
+    if (inputLine == "q" || inputLine == "Q") {
+        cout << "玩家主动退出。\n";
+        GameOver();
+    }
 
-	// 分析自己收到的输入和自己过往的输出，并恢复状态
-	int turnID;
-	currBotColor = -1; // 第一回合收到坐标是-1, -1，说明我是黑方
-	cin >> turnID;
-	for (int i = 0; i < turnID - 1; i++)
-	{
-		// 根据这些输入输出逐渐恢复状态到当前回合
-		cin >> x0 >> y0 >> x1 >> y1;
-		if (x1 >= 0)
-			ProcStep(x0, y0, x1, y1, -currBotColor); // 模拟对方落子
-		else
-			currBotColor = 1;
-		cin >> x0 >> y0 >> x1 >> y1;
-		if (x1 >= 0)
-			ProcStep(x0, y0, x1, y1, currBotColor); // 模拟己方落子
-	}
+    int x0, y0, x1, y1;
+    sscanf(inputLine.c_str(), "%d %d %d %d", &x0, &y0, &x1, &y1);
 
-	// 看看自己本回合输入
-	cin >> x0 >> y0 >> x1 >> y1;
-	if (x1 >= 0)
-		ProcStep(x0, y0, x1, y1, -currBotColor); // 模拟对方落子
-	else
-		currBotColor = 1;
+    if (x0 == -1 && y0 == -1 && x1 == -1 && y1 == -1) {
+        cout << sideStr << " 选择跳过本回合。\n";
+        return false;
+    }
 
-	// 找出合法落子点
-	int beginPos[1000][2], possiblePos[1000][2], posCount = 0, choice, dir;
+    if (!ProcStep(x0, y0, x1, y1, color)) {
+        cout << "无效落子，请重新输入。\n";
+        return PlayerMove(color); // 递归重新输入
+    }
 
-	for (y0 = 0; y0 < 7; y0++)
-		for (x0 = 0; x0 < 7; x0++)
-		{
-			if (gridInfo[x0][y0] != currBotColor)
-				continue;
-			for (dir = 0; dir < 24; dir++)
-			{
-				x1 = x0 + delta[dir][0];
-				y1 = y0 + delta[dir][1];
-				if (!inMap(x1, y1))
-					continue;
-				if (gridInfo[x1][y1] != 0)
-					continue;
-				beginPos[posCount][0] = x0;
-				beginPos[posCount][1] = y0;
-				possiblePos[posCount][0] = x1;
-				possiblePos[posCount][1] = y1;
-				posCount++;
-			}
-		}
+    return true;
+}
 
-	// 做出决策（你只需修改以下部分）
-	int startX, startY, resultX, resultY;
-	if (posCount > 0)
-	{
-		srand(time(0));
-		choice = rand() % posCount;
-		startX = beginPos[choice][0];
-		startY = beginPos[choice][1];
-		resultX = possiblePos[choice][0];
-		resultY = possiblePos[choice][1];
-	}
-	else
-	{
-		startX = -1;
-		startY = -1;
-		resultX = -1;
-		resultY = -1;
-	}
+int main() {
+    srand(time(0));
+    int mode;
+    cout << "请选择模式 (0: 复盘操作, 1: 逐步输入): ";
+    cin >> mode;
 
+    gridInfo[0][6] = gridInfo[6][0] = -1;   // 黑白
+    gridInfo[0][0] = gridInfo[6][6] = 1;    // 白黑
 
+    PrintBoard();
 
-	// 决策结束，输出结果（你只需修改以上部分）
-	printBoard();
-	cout << startX << " " << startY << " " << resultX << " " << resultY;
-	return 0;
+    if (mode == 0) {
+        int turnID;
+        cout << "请输入复盘步数（turnID）: ";
+        cin >> turnID;
+
+        for (int i = 0; i < turnID; i++) {
+            int x0, y0, x1, y1;
+            cout << "请输入第 " << i + 1 << " 回合对方落子 (x0 y0 x1 y1): ";
+            cin >> x0 >> y0 >> x1 >> y1;
+            ProcStep(x0, y0, x1, y1, -currBotColor);
+            PrintBoard();
+
+            cout << "请输入我方落子 (x0 y0 x1 y1): ";
+            cin >> x0 >> y0 >> x1 >> y1;
+            ProcStep(x0, y0, x1, y1, currBotColor);
+            PrintBoard();
+        }
+    }
+    else {
+        cout << "是否将黑方设置为 Bot？(1: 是, 0: 否): ";
+        cin >> isBlackBot;
+        cout << "是否将白方设置为 Bot？(1: 是, 0: 否): ";
+        cin >> isWhiteBot;
+        cin.ignore(); // 清除输入缓冲
+
+        int turn = 0;
+        int passCount = 0;
+
+        while (true) {
+            turn++;
+            string sideStr = (currBotColor == 1 ? "黑方(○)" : "白方(●)");
+            cout << "\n[第 " << turn << " 回合] 当前轮到 " << sideStr << " 落子\n";
+
+            bool moved = false;
+            if ((currBotColor == 1 && isBlackBot) || (currBotColor == -1 && isWhiteBot)) {
+                int x0, y0, x1, y1;
+                if (BotMove(currBotColor, x0, y0, x1, y1)) {
+                    cout << sideStr << "（Bot）落子：" << x0 << " " << y0 << " -> " << x1 << " " << y1 << "\n";
+                    ProcStep(x0, y0, x1, y1, currBotColor);
+                    moved = true;
+                }
+                else {
+                    cout << sideStr << "（Bot）跳过本回合。\n";
+                }
+            }
+            else {
+                moved = PlayerMove(currBotColor);
+            }
+
+            if (moved) {
+                passCount = 0;
+            }
+            else {
+                passCount++;
+                if (passCount >= 2) {
+                    cout << "双方连续跳过，对局结束。\n";
+                    GameOver();
+                }
+            }
+
+            PrintBoard();
+            currBotColor *= -1;
+        }
+    }
+
+    return 0;
 }
