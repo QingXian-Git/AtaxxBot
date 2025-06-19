@@ -7,6 +7,7 @@
 #include <ctime>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 #include <unordered_set>
 #include <cstdint>
 #include <unordered_map>
@@ -14,17 +15,18 @@
 
 using namespace std;
 
-const int MAX_DEPTH = 3;
-const int MAX_NUM = 1e9;
-const int MIN_NUM = -1e9;
+const int MAX_DEPTH = 6;
+const double MAX_NUM = 1e9;
+const double MIN_NUM = -1e9;
 const int TIME_LIMIT_MS = 700;
-int CORNER_WEIGHT = 0;
-int STABLE_WEIGHT = 0;
-int COUNT_WEIGHT = 0;
-int MOBILITY_WEIGHT = 0;
-int JUMP_WEIGHT = 0;
-int BORDER_WEIGHT = 0;
+double CORNER_WEIGHT = 0;
+double STABLE_WEIGHT = 0;
+double COUNT_WEIGHT = 0;
+double MOBILITY_WEIGHT = 0;
+double BORDER_WEIGHT = 0;
+double JUMP_WEIGHT = 0;
 
+Json::Value ret;
 int bestDepth = 0;
 int posCount = 0;
 int startX, startY, resultX, resultY;
@@ -53,17 +55,10 @@ struct Move {
 };
 
 struct GameState {
-	int board[7][7];
+	int board[7][7] = { 0 };
 	int blackCount;
 	int whiteCount;
-	GameState() : blackCount(0), whiteCount(0) {
-		for (int i = 0; i < 7; ++i)
-			for (int j = 0; j < 7; ++j)
-				board[i][j] = 0;
-	}
 };
-
-GameState currState;
 
 
 struct MCTSNode {
@@ -75,8 +70,8 @@ struct MCTSNode {
 	Move move;
 	bool fullyExpanded;
 
-	MCTSNode(GameState state,MCTSNode* parent=nullptr,Move move={})
-		:parent(parent), move(move), state(state), visits(0),wins(0),fullyExpanded(false){}
+	MCTSNode(GameState state, MCTSNode* parent = nullptr, Move move = {})
+		:parent(parent), move(move), state(state), visits(0), wins(0), fullyExpanded(false) {}
 
 	~MCTSNode() {
 		for (MCTSNode* child : children) {
@@ -108,16 +103,6 @@ inline bool MoveStep(int& x, int& y, int Direction)
 	x = x + delta[Direction][0];
 	y = y + delta[Direction][1];
 	return inMap(x, y);
-}
-
-
-
-bool isGameOver() {
-	int emptyCount = 49 - blackPieceCount - whitePieceCount;
-	if (emptyCount == 0)
-		return true;
-	if (blackPieceCount == 0 || whitePieceCount == 0)
-		return true;
 }
 
 // 在坐标处落子，检查是否合法或模拟落子
@@ -239,7 +224,19 @@ bool ProcStep(int x0, int y0, int x1, int y1, int color, bool& jumpFlag)
 	return true;
 }
 
-bool applyMove(GameState& state,const Move& move) {
+bool timeExceeded() {
+	auto now = chrono::high_resolution_clock::now();
+	int elapsed = chrono::duration_cast<chrono::milliseconds>(now - startTime).count();
+	return elapsed >= TIME_LIMIT_MS;
+}
+
+bool timeExceeded(const int& limit) {
+	auto now = chrono::high_resolution_clock::now();
+	int elapsed = chrono::duration_cast<chrono::milliseconds>(now - startTime).count();
+	return elapsed >= limit;
+}
+
+bool applyMove(GameState& state, const Move& move) {
 	int color = state.board[move.x0][move.y0];
 	int dx, dy, dir;
 	int currCount = 0;
@@ -269,7 +266,7 @@ bool applyMove(GameState& state,const Move& move) {
 		{
 			currCount++;
 			state.board[nx][ny] = color;
-			
+
 		}
 	}
 	if (currCount != 0)
@@ -289,17 +286,6 @@ bool applyMove(GameState& state,const Move& move) {
 }
 
 
-bool timeExceeded() {
-	auto now = chrono::high_resolution_clock::now();
-	int elapsed = chrono::duration_cast<chrono::milliseconds>(now - startTime).count();
-	return elapsed >= TIME_LIMIT_MS;
-}
-
-bool timeExceeded(const int& limit) {
-	auto now = chrono::high_resolution_clock::now();
-	int elapsed = chrono::duration_cast<chrono::milliseconds>(now - startTime).count();
-	return elapsed >= limit;
-}
 
 bool isStable(int x, int y) {
 	for (int d = 0; d < 8; d++) {
@@ -313,6 +299,68 @@ bool isStable(int x, int y) {
 		}
 	}
 	return true;
+}
+
+int MCTSMoves(GameState& state, Move moves[], int color) {
+	int count = 0;
+	bool visited[7][7] = { false };
+	for (int y0 = 0; y0 < 7; ++y0) {
+		for (int x0 = 0; x0 < 7; ++x0) {
+			if (state.board[x0][y0] != color) continue;
+
+			for (int dir = 0; dir < 24; ++dir) {
+				int dx = delta[dir][0], dy = delta[dir][1];
+				int x1 = x0 + dx;
+				int y1 = y0 + dy;
+
+				if (!inMap(x1, y1)) continue;
+				if (state.board[x1][y1] != 0) continue;
+				if (abs(dx) <= 1 && abs(dy) <= 1) {
+					if (!visited[x1][y1]) {
+						visited[x1][y1] = true;
+						moves[count++] = { x0, y0, x1, y1 };
+					}
+				}
+				// 跳跃步直接记录，不去重
+				else {
+					moves[count++] = { x0, y0, x1, y1 };
+				}
+
+			}
+		}
+	}
+	return count;
+}
+
+int MCTSMoves(const GameState& state, int color) {
+	int count = 0;
+	bool visited[7][7] = { false };
+	for (int y0 = 0; y0 < 7; ++y0) {
+		for (int x0 = 0; x0 < 7; ++x0) {
+			if (state.board[x0][y0] != color) continue;
+
+			for (int dir = 0; dir < 24; ++dir) {
+				int dx = delta[dir][0], dy = delta[dir][1];
+				int x1 = x0 + dx;
+				int y1 = y0 + dy;
+
+				if (!inMap(x1, y1)) continue;
+				if (state.board[x1][y1] != 0) continue;
+				if (abs(dx) <= 1 && abs(dy) <= 1) {
+					if (!visited[x1][y1]) {
+						visited[x1][y1] = true;
+						count++;
+					}
+				}
+				// 跳跃步直接记录，不去重
+				else {
+					count++;
+				}
+
+			}
+		}
+	}
+	return count;
 }
 
 int GenerateMoves(int color) {
@@ -377,6 +425,17 @@ int GenerateMoves(Move moves[], int color) {
 	return count;
 }
 
+bool isGameOver(int& blackMoves, int& whiteMoves) {
+	int emptyCount = 49 - blackPieceCount - whitePieceCount;
+	if (emptyCount == 0)
+		return true;
+	if (blackPieceCount == 0 || whitePieceCount == 0)
+		return true;
+	if (blackMoves == 0 || whiteMoves == 0)
+		return true;
+	return false;
+}
+
 bool isGameOver(const GameState& state) {
 	// 1. 棋盘已满
 	int emptyCount = 49 - state.blackCount - state.whiteCount;
@@ -388,15 +447,38 @@ bool isGameOver(const GameState& state) {
 	if (state.blackCount == 0 || state.whiteCount == 0)
 		return true;
 
-	// 3. 双方都没有合法走法
-	int blackMoves = GenerateMoves(1);
-	int whiteMoves = GenerateMoves(-1);
-	if (blackMoves == 0 && whiteMoves == 0)
+	// 3. 一方没有合法走法
+
+	int blackMoves = MCTSMoves(state, 1);
+	int whiteMoves = MCTSMoves(state, -1);
+	if (blackMoves == 0 || whiteMoves == 0)
 		return true;
 
 	// 否则游戏尚未结束
 	return false;
 }
+
+int getWinner(const GameState& state) {
+
+	int blackMoves = MCTSMoves(state, 1);
+	int whiteMoves = MCTSMoves(state, -1);
+	int bCount = state.blackCount;
+	int wCount = state.whiteCount;
+	int emptyCount = 49 - bCount - wCount;
+	if (blackMoves > 0 && whiteMoves == 0) {
+		bCount += emptyCount;
+	}
+	else if (blackMoves == 0 && whiteMoves > 0) {
+		wCount += emptyCount;
+	}
+	if (bCount > wCount)
+		return 1;      // 黑棋胜
+	else if (wCount > bCount)
+		return -1;     // 白棋胜
+	else
+		return 0;      // 平局
+}
+
 //MCTS
 MCTSNode* selectPromisingNode(MCTSNode* node) {
 	while (!node->children.empty()) {
@@ -411,9 +493,9 @@ MCTSNode* selectPromisingNode(MCTSNode* node) {
 	return node;
 }
 
-MCTSNode* expandNode(MCTSNode* node,int color) {
+MCTSNode* expandNode(MCTSNode* node, int color) {
 	Move legalMoves[500];
-	int moveCount = GenerateMoves(legalMoves, color);
+	int moveCount = MCTSMoves(node->state, legalMoves, color);
 	unordered_set<Move> tried;
 	for (auto* child : node->children) {
 		tried.insert(child->move);
@@ -423,7 +505,7 @@ MCTSNode* expandNode(MCTSNode* node,int color) {
 			GameState newState = node->state;
 			if (!applyMove(newState, legalMoves[i]))
 				continue;
-			MCTSNode* child = new MCTSNode(newState,node, legalMoves[i]);
+			MCTSNode* child = new MCTSNode(newState, node, legalMoves[i]);
 			node->children.push_back(child);
 			return child;
 		}
@@ -435,51 +517,70 @@ MCTSNode* expandNode(MCTSNode* node,int color) {
 int simulateRandom(GameState state, int currPlayer) {
 	while (!isGameOver(state)) {
 		Move legalMoves[500];
-		int moveCount = GenerateMoves(legalMoves, currPlayer);
+		int moveCount = MCTSMoves(state, legalMoves, currPlayer);
 		if (moveCount == 0) {
 			currPlayer = -currPlayer;
 			continue;
 		}
+		int index = rand() % moveCount;
+		applyMove(state, legalMoves[index]);
+		currPlayer = -currPlayer;
 	}
-	return 0;
+	int winner = getWinner(state);
+	return winner;
 }
 
-void backPropagate(MCTSNode* node,int result,int botColor);
+void backPropagate(MCTSNode* node, int result, int botColor) {
+	while (node != nullptr) {
+		node->visits++;
+		if (result == botColor) {
+			node->wins++;
+		}
+		node = node->parent;
+	}
+}
 
 //待办：空位被对方使用后的目数
-int Evaluate() {
-	int score = 0;
+double Evaluate(bool jumpTag) {
+	double score = 0;
 	int stableCount = 0;
 	int myCount = (currBotColor == 1 ? blackPieceCount : whitePieceCount);
 	int opCount = (currBotColor == 1 ? whitePieceCount : blackPieceCount);
 	int emptyCount = 49 - blackPieceCount - whitePieceCount;
+	int myMoveCount = 0;
+	int opMoveCount = 0;
+	int mobility = 0;
 	bool flag = true;
 
-	if (emptyCount > 30) {	//开局决策权重
-		CORNER_WEIGHT = 3;
-		COUNT_WEIGHT = 8;
-		STABLE_WEIGHT = 6;
+	if (emptyCount > 32) {	//开局决策权重
+		CORNER_WEIGHT = 0.05;
+		COUNT_WEIGHT = 0.55;
+		STABLE_WEIGHT = 0.25;
 		MOBILITY_WEIGHT = 0;
-		JUMP_WEIGHT = 8;
+		BORDER_WEIGHT = 0;
+		JUMP_WEIGHT = 0.15;
 	}
-	else if (emptyCount > 12) {	//中期决策权重
-		CORNER_WEIGHT = 3;
-		COUNT_WEIGHT = 10;
-		STABLE_WEIGHT = 4;
-		MOBILITY_WEIGHT = 0;
-		JUMP_WEIGHT = 10;
+	else if (emptyCount > 15) {	//中期决策权重
+		CORNER_WEIGHT = 0.05;
+		COUNT_WEIGHT = 0.6;
+		STABLE_WEIGHT = 0.25;
+		MOBILITY_WEIGHT = 0.05;
+		BORDER_WEIGHT = 0;
+		JUMP_WEIGHT = 0.15;
 	}
 	else {	//末期决策权重
-		CORNER_WEIGHT = 2;
-		COUNT_WEIGHT = 10;
-		STABLE_WEIGHT = 2;
+		CORNER_WEIGHT = 0;
+		COUNT_WEIGHT = 0.6;
+		STABLE_WEIGHT = 0.1;
 		MOBILITY_WEIGHT = 0;
-		JUMP_WEIGHT = 10;
+		BORDER_WEIGHT = 0;
+		JUMP_WEIGHT = 0.3;
 	}
 
 	if (MOBILITY_WEIGHT != 0) {
-		int opMoveCount = GenerateMoves(-currBotColor);
-		score -= opMoveCount * MOBILITY_WEIGHT;
+		myMoveCount = GenerateMoves(currBotColor);
+		opMoveCount = GenerateMoves(-currBotColor);
+		mobility = myMoveCount - opMoveCount;
 	}
 
 
@@ -520,38 +621,69 @@ int Evaluate() {
 						stableCount++;
 					}
 				}
-				else if (gridInfo[x][y] == -currBotColor) {
-					if (isStable(x, y)) {
-						stableCount--;
-					}
-				}
 			}
 		}
+	}
+
+	if (jumpTag && mobility >= 0) {
+		score -= 3 * JUMP_WEIGHT;
 	}
 
 
 	score += (myCount - opCount) * COUNT_WEIGHT;
 	score += stableCount * STABLE_WEIGHT;
+	score += (mobility * MOBILITY_WEIGHT);
 	return score;
+}
+
+double EasyEvaluate() {
+	int myCount = (currBotColor == 1 ? blackPieceCount : whitePieceCount);
+	int opCount = (currBotColor == 1 ? whitePieceCount : blackPieceCount);
+	int score = 0.6 * (myCount - opCount);
+	return score;
+}
+
+double EvaluateEnd(int& blackMoves, int& whiteMoves) {
+	int myCount = (currBotColor == 1 ? blackPieceCount : whitePieceCount);
+	int opCount = (currBotColor == 1 ? whitePieceCount : blackPieceCount);
+	int emptyCount = 49 - myCount - opCount;
+	if (blackMoves > 0 && whiteMoves == 0) {
+		myCount += currBotColor == 1 ? emptyCount : 0;
+		opCount += currBotColor == 1 ? 0 : emptyCount;
+	}
+	else if (blackMoves == 0 && whiteMoves > 0) {
+		myCount += currBotColor == 1 ? 0 : emptyCount;
+		opCount += currBotColor == 1 ? emptyCount : 0;
+	}
+	if (myCount >= opCount) {
+		return MAX_NUM;
+	}
+	else {
+		return MIN_NUM;
+	}
+
+	return 0;
 }
 
 
 
-int AlphaBeta(int depth, int alpha, int beta, bool maximizingPlayer, int color) {
+double AlphaBeta(int depth, double alpha, double beta, bool maximizingPlayer, int color, bool jumpTag) {
 	Move botMoves[500];
 	int moveCount = GenerateMoves(botMoves, color);
-	if (depth == 0 || moveCount==0||timeExceeded())
-		return Evaluate();
+	int blackMoves = GenerateMoves(1);
+	int whiteMoves = GenerateMoves(-1);
+	if (depth == 0 || isGameOver(blackMoves, whiteMoves))
+		return Evaluate(jumpTag);
 
 	if (maximizingPlayer) {
-		int value = MIN_NUM;
+		double value = MIN_NUM;
 		for (int i = 0; i < moveCount; i++) {
 			Move& m = botMoves[i];
 			int backup[7][7];
 			memcpy(backup, gridInfo, sizeof(gridInfo));
 			int b = blackPieceCount, w = whitePieceCount;
 			ProcStep(m.x0, m.y0, m.x1, m.y1, color);
-			value = max(value, AlphaBeta(depth - 1, alpha, beta, false, -color));
+			value = max(value, AlphaBeta(depth - 1, alpha, beta, false, -color, jumpTag));
 			memcpy(gridInfo, backup, sizeof(gridInfo));
 			blackPieceCount = b; whitePieceCount = w;
 			alpha = max(alpha, value);
@@ -561,14 +693,14 @@ int AlphaBeta(int depth, int alpha, int beta, bool maximizingPlayer, int color) 
 		return value;
 	}
 	else {
-		int value = MAX_NUM;
+		double value = MAX_NUM;
 		for (int i = 0; i < moveCount; i++) {
 			Move& m = botMoves[i];
 			int backup[7][7];
 			memcpy(backup, gridInfo, sizeof(gridInfo));
 			int b = blackPieceCount, w = whitePieceCount;
 			ProcStep(m.x0, m.y0, m.x1, m.y1, color);
-			value = min(value, AlphaBeta(depth - 1, alpha, beta, true, -color));
+			value = min(value, AlphaBeta(depth - 1, alpha, beta, true, -color, jumpTag));
 			memcpy(gridInfo, backup, sizeof(gridInfo));
 			blackPieceCount = b; whitePieceCount = w;
 			beta = min(beta, value);
@@ -580,38 +712,83 @@ int AlphaBeta(int depth, int alpha, int beta, bool maximizingPlayer, int color) 
 
 }
 
+Move MCTSBestMove() {
+	auto startTime = chrono::high_resolution_clock::now();  // 记录开始时间
+	::startTime = startTime;  // 设置全局 startTime，供 timeExceeded 使用
+	GameState rootState;
+	memcpy(rootState.board, gridInfo, sizeof(gridInfo));
+	rootState.blackCount = blackPieceCount;
+	rootState.whiteCount = whitePieceCount;
+
+	MCTSNode* root = new MCTSNode(rootState);
+
+	int simulations = 0;
+
+	while (!timeExceeded()) {  // 时间控制
+		MCTSNode* node = selectPromisingNode(root);
+
+		int currPlayer = (node->state.blackCount + node->state.whiteCount) % 2 == 0 ? 1 : -1;
+		if (!node->fullyExpanded) {
+			node = expandNode(node, currPlayer);
+		}
+
+		int result = simulateRandom(node->state, currPlayer);
+		backPropagate(node, result, currBotColor);
+
+		simulations++;
+	}
+
+	// 选择访问次数最多的子节点作为最佳落子
+	MCTSNode* bestChild = nullptr;
+	int maxVisits = -1;
+	for (auto child : root->children) {
+		if (child->visits > maxVisits) {
+			maxVisits = child->visits;
+			bestChild = child;
+		}
+	}
+
+	Move bestMove = bestChild ? bestChild->move : Move{ -1, -1, -1, -1 };
+
+	// 清理内存
+	delete root;
+
+	// 可选：输出调试信息
+	// std::cerr << "Simulations: " << simulations << std::endl;
+
+	return bestMove;
+}
+
 //提高剪枝效率
 Move IterativeDeepening(int color) {
 	startTime = chrono::high_resolution_clock::now();
 	Move bestMove = { -1,-1,-1,-1 };		//此处存在错误，当进行一轮迭代之后，后续迭代会沿用上一次的bestScore
-	int bestScore = MIN_NUM;				//导致每次比较并不是当前迭代层数内的比较，而是跨层数
+	double bestScore = MIN_NUM;				//导致每次比较并不是当前迭代层数内的比较，而是跨层数
 	//要想办法在每次迭代前重置这一数值，并且在后一层迭代没有运行完的情况下，优先使用前一层迭代的最终结果（即使用跑完的那个)
 
 	Move moves[500];
 	int moveCount = GenerateMoves(moves, color);
+	bestMove = moves[0];
 	//bug范围在下方函数中(已修复，bug位于AlphaBeta（）函数中)
 	//错误原因：对于每一次的深度，缺乏因深度加深导致无棋可下的局面的判定（moveCount=0）
 	for (int depth = 1; depth <= MAX_DEPTH; depth++) {
-		bool isJump = false;
 		bool completed = true;
 		Move currBestMove = { -1,-1,-1,-1 };
-		int currBestScore = MIN_NUM;
+		double currBestScore = MIN_NUM;
 		for (int i = 0; i < moveCount; i++) {
+			bool isJump = false;;
 			if (timeExceeded()) {
 				completed = false;
 				break;
 			}
-			Move &m = moves[i];
+			Move& m = moves[i];
 			int backup[7][7];
 			memcpy(backup, gridInfo, sizeof(gridInfo));
 			int bCount = blackPieceCount, wCount = whitePieceCount;
 
 			if (!ProcStep(m.x0, m.y0, m.x1, m.y1, color, isJump))
 				continue;
-			int score = AlphaBeta(depth - 1, MIN_NUM, MAX_NUM, false, -color);
-			if (isJump) {
-				score -= JUMP_WEIGHT;
-			}
+			double score = AlphaBeta(depth - 1, MIN_NUM, MAX_NUM, false, -color, isJump);
 			memcpy(gridInfo, backup, sizeof(gridInfo));
 			blackPieceCount = bCount;
 			whitePieceCount = wCount;
@@ -626,6 +803,7 @@ Move IterativeDeepening(int color) {
 			bestDepth = depth;
 		}
 		else {
+			/*
 			if (!timeExceeded(900) && bestMove.x0 != -1) {
 				int backup[7][7];
 				memcpy(backup, gridInfo, sizeof(gridInfo));
@@ -653,9 +831,14 @@ Move IterativeDeepening(int color) {
 				bestMove = currBestMove;
 				bestScore = currBestScore;
 			}
+			*/
+
 			break;
 		}
 	}
+	Json::Value depthInfo;
+	depthInfo["CurrentDepth"] = bestDepth;
+	ret["debug"] = depthInfo;
 	return bestMove;
 }
 
@@ -712,8 +895,6 @@ int main()
 	resultY = botMove.y1;
 
 	// 决策结束，输出结果（你只需修改以上部分）
-
-	Json::Value ret;
 	ret["response"]["x0"] = startX;
 	ret["response"]["y0"] = startY;
 	ret["response"]["x1"] = resultX;
