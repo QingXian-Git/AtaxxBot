@@ -1,1 +1,3 @@
-Hello,Git!
+# 同化棋Bot
+采用alphabeta剪枝和蒙特卡洛树搜索联合算法来规划bot落子，从而实现在规定时间内的相对最优解。
+最终版本为AtaxxJsonVer中的项目
